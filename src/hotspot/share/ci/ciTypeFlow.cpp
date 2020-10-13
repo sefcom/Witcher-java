@@ -874,6 +874,8 @@ bool ciTypeFlow::StateVector::apply_one_bytecode(ciBytecodeStream* str) {
                   Bytecodes::name(str->cur_bc()));
   }
 
+  // WITCHER_TRACE();
+
   switch(str->cur_bc()) {
   case Bytecodes::_aaload: do_aaload(str);                       break;
 

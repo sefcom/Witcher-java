@@ -75,10 +75,14 @@ class TemplateInterpreterGenerator: public AbstractInterpreterGenerator {
 
   // Helpers for generate_and_dispatch
   address generate_trace_code(TosState state)   PRODUCT_RETURN0;
+
+  address generate_instrument_code(TosState state); // Witcher Instrumentation
+
   void count_bytecode()                         PRODUCT_RETURN;
   void histogram_bytecode(Template* t)          PRODUCT_RETURN;
   void histogram_bytecode_pair(Template* t)     PRODUCT_RETURN;
   void trace_bytecode(Template* t)              PRODUCT_RETURN;
+  void instrument_bytecode_fn(Template* t); // Witcher Instrumentation
   void stop_interpreter_at()                    PRODUCT_RETURN;
 
   void generate_all();

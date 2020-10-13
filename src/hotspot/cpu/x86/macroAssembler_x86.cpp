@@ -875,10 +875,12 @@ extern "C" void findpc(intptr_t x);
 
 void MacroAssembler::debug64(char* msg, int64_t pc, int64_t regs[]) {
   // In order to get locks to work, we need to fake a in_VM state
+
   if (ShowMessageBoxOnError) {
     JavaThread* thread = JavaThread::current();
     JavaThreadState saved_state = thread->thread_state();
     thread->set_thread_state(_thread_in_vm);
+
 #ifndef PRODUCT
     if (CountBytecodes || TraceBytecodes || StopInterpreterAt) {
       ttyLocker ttyl;
@@ -2347,7 +2349,6 @@ void MacroAssembler::call_VM(Register oop_result,
   bind(C);
 
   LP64_ONLY(assert(arg_1 != c_rarg2, "smashed arg"));
-
   pass_arg2(this, arg_2);
   pass_arg1(this, arg_1);
   call_VM_helper(oop_result, entry_point, 2, check_exceptions);
@@ -2501,7 +2502,7 @@ void MacroAssembler::call_VM_base(Register oop_result,
 #ifdef ASSERT
   // TraceBytecodes does not use r12 but saves it over the call, so don't verify
   // r12 is the heapbase.
-  LP64_ONLY(if ((UseCompressedOops || UseCompressedClassPointers) && !TraceBytecodes) verify_heapbase("call_VM_base: heap base corrupted?");)
+  LP64_ONLY(if ((UseCompressedOops || UseCompressedClassPointers) && !TraceBytecodes && !WitcherInstrumentation) verify_heapbase("call_VM_base: heap base corrupted?");)
 #endif // ASSERT
 
   assert(java_thread != oop_result  , "cannot use the same register for java_thread & oop_result");

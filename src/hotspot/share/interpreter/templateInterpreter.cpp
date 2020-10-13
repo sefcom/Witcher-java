@@ -192,6 +192,7 @@ address    TemplateInterpreter::_throw_exception_entry                      = NU
 #ifndef PRODUCT
 EntryPoint TemplateInterpreter::_trace_code;
 #endif // !PRODUCT
+EntryPoint TemplateInterpreter::_instrument_code; //Witcher instrumentation
 EntryPoint TemplateInterpreter::_return_entry[TemplateInterpreter::number_of_return_entries];
 EntryPoint TemplateInterpreter::_earlyret_entry;
 EntryPoint TemplateInterpreter::_deopt_entry [TemplateInterpreter::number_of_deopt_entries ];

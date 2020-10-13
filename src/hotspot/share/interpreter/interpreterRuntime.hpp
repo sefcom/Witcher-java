@@ -142,6 +142,9 @@ class InterpreterRuntime: AllStatic {
 
   // Native signature handlers
   static void prepare_native_call(JavaThread* thread, Method* method);
+
+  static intptr_t instrument_bytecode(JavaThread* thread, intptr_t preserve_this_value, intptr_t tos, intptr_t tos2); // Witcher Instrumentation
+
   static address slow_signature_handler(JavaThread* thread,
                                         Method* method,
                                         intptr_t* from, intptr_t* to);

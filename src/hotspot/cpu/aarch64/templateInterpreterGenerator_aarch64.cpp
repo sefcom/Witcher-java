@@ -2037,7 +2037,7 @@ address TemplateInterpreterGenerator::generate_trace_code(TosState state) {
   __ push(RegSet::range(r0, r15), sp);
   __ mov(c_rarg2, r0);  // Pass itos
   __ call_VM(noreg,
-             CAST_FROM_FN_PTR(address, InterpreterRuntime::trace_bytecode),
+             CAST_FROM_FN_PTR(address, InterpreterRuntime::instrument_bytecode),
              c_rarg1, c_rarg2, c_rarg3);
   __ pop(RegSet::range(r0, r15), sp);
   __ pop(state);
@@ -2064,14 +2064,25 @@ void TemplateInterpreterGenerator::histogram_bytecode(Template* t) { ; }
 void TemplateInterpreterGenerator::histogram_bytecode_pair(Template* t) { ; }
 
 
+void TemplateInterpreterGenerator::instrument_bytecode_fn(Template* t) {
+  // Call a little run-time stub to avoid blow-up for each bytecode.
+  // The run-time runtime saves the right registers, depending on
+  // the tosca in-state for the given template.
+printf("OTHEROTHEROTHER\n");
+  assert(Interpreter::instrument_code(t->tos_in()) != NULL,
+         "entry must have been generated");
+  __ bl(Interpreter::instrument_code(t->tos_in()));
+  __ reinit_heapbase();
+}
+
 void TemplateInterpreterGenerator::trace_bytecode(Template* t) {
   // Call a little run-time stub to avoid blow-up for each bytecode.
   // The run-time runtime saves the right registers, depending on
   // the tosca in-state for the given template.
 
-  assert(Interpreter::trace_code(t->tos_in()) != NULL,
+  assert(Interpreter::instrument_code(t->tos_in()) != NULL,
          "entry must have been generated");
-  __ bl(Interpreter::trace_code(t->tos_in()));
+  __ bl(Interpreter::instrument_code(t->tos_in()));
   __ reinit_heapbase();
 }
 

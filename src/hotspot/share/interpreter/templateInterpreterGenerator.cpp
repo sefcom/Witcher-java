@@ -83,6 +83,23 @@ void TemplateInterpreterGenerator::generate_all() {
   }
 #endif // !PRODUCT
 
+  {
+      CodeletMark cm(_masm, "bytecode instrumentation support");
+    Interpreter::_instrument_code =
+      EntryPoint(
+                 generate_instrument_code(btos),
+                 generate_instrument_code(ztos),
+                 generate_instrument_code(ctos),
+                 generate_instrument_code(stos),
+                 generate_instrument_code(atos),
+                 generate_instrument_code(itos),
+                 generate_instrument_code(ltos),
+                 generate_instrument_code(ftos),
+                 generate_instrument_code(dtos),
+                 generate_instrument_code(vtos)
+                 );
+
+  }
   { CodeletMark cm(_masm, "return entry points");
     const int index_size = sizeof(u2);
     Interpreter::_return_entry[0] = EntryPoint();
@@ -363,9 +380,16 @@ void TemplateInterpreterGenerator::set_short_entry_points(Template* t, address& 
 
 
 //------------------------------------------------------------------------------------------------------------------------
+bool checked_env = false, do_instrument=false; // Witcher bools
 
 void TemplateInterpreterGenerator::generate_and_dispatch(Template* t, TosState tos_out) {
   if (PrintBytecodeHistogram)                                    histogram_bytecode(t);
+
+  if (WitcherInstrumentation){
+    //templateInterpreterGenerator_ARCH.instrument_bytecode(t)
+    instrument_bytecode_fn(t); //Witcher Instrumentation
+  }
+
 #ifndef PRODUCT
   // debugging code
   if (CountBytecodes || TraceBytecodes || StopInterpreterAt > 0) count_bytecode();
@@ -374,6 +398,7 @@ void TemplateInterpreterGenerator::generate_and_dispatch(Template* t, TosState t
   if (StopInterpreterAt > 0)                                     stop_interpreter_at();
   __ verify_FPU(1, t->tos_in());
 #endif // !PRODUCT
+
   int step = 0;
   if (!t->does_dispatch()) {
     step = t->is_wide() ? Bytecodes::wide_length_for(t->bytecode()) : Bytecodes::length_for(t->bytecode());

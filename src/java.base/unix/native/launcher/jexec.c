@@ -159,7 +159,7 @@ int main(int argc, const char * argv[]) {
     int           nargc = 0;             /* new args array count */
     int           argi  = 0;             /* index into old array */
     size_t        alen  = 0;             /* length of new array */
-
+    
     /* Make sure we have something to work with */
     if ((argc < 1) || (argv == NULL)) {
         /* Shouldn't happen... */

@@ -1555,6 +1555,7 @@ void Assembler::call_literal(address entry, RelocationHolder const& rspec) {
   // implied by the fact that we're emitting a call instruction.
 
   int operand = LP64_ONLY(disp32_operand) NOT_LP64(call32_operand);
+
   emit_data((int) disp, rspec, operand);
 }
 

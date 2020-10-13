@@ -1561,6 +1561,385 @@ IRT_ENTRY(void, InterpreterRuntime::member_name_arg_or_null(JavaThread* thread, 
 IRT_END
 #endif // INCLUDE_JVMTI
 
+/**
+Witcher additions
+*/
+#include <sys/shm.h>
+#include <signal.h>
+#include <dlfcn.h>
+#include <dirent.h>
+#include <fstream>
+#include <stdint.h>
+
+#define MAPSIZE 65536
+#define SHM_ENV_VAR         "__AFL_SHM_ID"
+char str_address[8];
+int start_tracing=0;
+unsigned long hash;
+bool firstpass = true;
+static unsigned char *afl_area_ptr = NULL;
+struct test_process_info {
+    int initialized;
+    int afl_id;
+    int port;
+    int reqr_process_id;
+    int process_id;
+    int start_recording;
+    char error_type[20]; /* SQL, Command */
+    char error_msg[100];
+};
+#define TEST_PROCESS_INFO_SHM_ID 0x411911
+#define TEST_PROCESS_INFO_MAX_NBR 100
+#define TEST_PROCESS_INFO_SMM_SIZE 0x4000
+struct test_process_info *tp_info_this = NULL;
+struct test_process_info *tp_info_all = NULL;
+bool firsttime=true;
+
+void error_handler(int nSignum) {
+    // this is slick, it sends the SIGSEGV to the forked process and then continues with this process lik it never happened.
+
+    if (tp_info_this && tp_info_this->initialized == 31337){
+        strcpy(tp_info_this->error_type,"COMMAND");
+        printf("\033[36m [Witcher] sending SEGSEGV to %d %d %d !!!\033[0m\n", tp_info_this->reqr_process_id, tp_info_this->process_id, getpid());
+        fflush(stdout);
+        kill(tp_info_this->reqr_process_id, SIGSEGV);
+        fprintf(stderr, "\033[36m [Witcher] SENT SEGSEGV to %d and my process ID is %d !!!\033[0m\n", tp_info_this->reqr_process_id, getpid());
+        fflush(stderr);
+    } else {
+        printf("\033[36m [Witcher] RECVD SIGUSR1 but cannot relay signal \033[0m\n");
+        fflush(stdout);
+    }
+
+    //ucontext_t* context = (ucontext_t*)vcontext;
+    //fprintf(stderr, "\033[36m [Witcher] Context set \033[0m\n");
+    //context->uc_mcontext.gregs[REG_RIP]++;
+
+}
+/**
+cgi_get_shm_mem looks in SHM_ENV_VAR for shared memory identifier, if not found it then tries to get it from
+/tmp/${PORT}.afl, the PORT is the one the flask application is using.
+*/
+
+unsigned char *cgi_get_shm_mem() {
+    int shm_id;
+    FILE *fp = NULL;
+    short inited=0;
+    if (firstpass){
+        firstpass = false;
+        if (getenv("SHOW_WITCH")){
+            printf("\033[36mWitcher is being executed and adding sig handler\n\033[0m");
+            signal(SIGUSR1, error_handler);
+
+            fflush(stdout);
+        }
+        if (getenv("__AFL_SHM_ID")){
+            afl_area_ptr = (unsigned char*)  shmat(atoi(getenv("__AFL_SHM_ID")), NULL, 0);
+        }
+    }
+    // this only works once per AFL run, if AFL dies the python app and AFL must be restarted.
+    if (afl_area_ptr == NULL){
+
+        // get test_process_info from shared memory
+        if (!tp_info_all ){
+            key_t mem_key = ftok("/tmp",'W');
+            printf("*** mem_key %x \n", mem_key);
+            fflush(stdout);
+            int tp_shm_id = shmget(mem_key, TEST_PROCESS_INFO_SMM_SIZE, 0666);
+
+            //int tp_shm_id = shmget(mem_key, TEST_PROCESS_INFO_SMM_SIZE, IPC_CREAT | 0666);
+            if (tp_shm_id < 0 ) {
+                //printf(" did not find tp_shm_id (%d) using %x \n", tp_shm_id, TEST_PROCESS_INFO_SHM_ID );
+                return NULL;
+            } else {
+                printf(" found tp_shm_id (%x) using %x \n", tp_shm_id, mem_key );
+            }
+
+            tp_info_all = (struct test_process_info *) shmat(tp_shm_id, NULL, 0);  /* attach */
+            if ((long) tp_info_all == -1) {
+                //printf(" did not find tp_info shared memory\n");
+                return NULL;
+            } else {
+                printf("\033[36mfound tp_info_all = %p  \n\033[0m", tp_info_all  );
+            }
+            for (int x=0; x < TEST_PROCESS_INFO_MAX_NBR; x++){
+                if (tp_info_all[x].initialized == 31337){
+                    //printf("\t\033[31mon port = %d \033[0m\n", tp_info_all[x]);
+                }
+            }
+            fflush(stdout);
+        }
+
+        if (!tp_info_this){
+
+            inited = 0;
+            for (int x=0; x < TEST_PROCESS_INFO_MAX_NBR; x++){
+                if (tp_info_all[x].initialized == 31337){
+                    inited = 1;
+                    break;
+                }
+            }
+            if (getenv("PORT") && firsttime){
+                //fprintf(stderr, "\033[36mPORT exists %s , inited = %p\n\033[0m", getenv("PORT"), inited);
+                firsttime=false;
+            }
+            if (!inited){
+                return NULL;
+            }
+
+            // get port for lookup
+            char *portstr = getenv("PORT") ? getenv("PORT") : getenv("WEBPORT");
+            if (!portstr){
+                printf("port is null\n");
+                return NULL;
+            }
+            fflush(stdout);
+            // lookup tp info by port and set afl_area_ptr and process_id
+            int port = atoi(portstr);
+            if (port == 0){
+                return NULL;
+            }
+            for (int x=0; x < TEST_PROCESS_INFO_MAX_NBR; x++){
+                if (tp_info_all[x].port == port){
+                    afl_area_ptr = (unsigned char*)  shmat(tp_info_all[x].afl_id, NULL, 0);
+                    if (afl_area_ptr == (void *) -1){
+                        printf("[Witcher] shmat returned -1 b/c afl_id=%d is a prior value, init=%d, port=%d==%d...clearing out stale information \n",
+                            tp_info_all[x].afl_id, tp_info_all[x].initialized, tp_info_all[x].port, port);
+                        perror("shmat failed ");
+                        tp_info_all[x].initialized=0;
+                        tp_info_all[x].port=0;
+                        tp_info_all[x].afl_id=0;
+                        afl_area_ptr = NULL;
+                        return NULL;
+                    } else {
+                        printf("[Witcher] WORKING...afl_id=%d is a prior value, init=%d, port=%d==%d...clearing out stale information \n",
+                            tp_info_all[x].afl_id, tp_info_all[x].initialized, tp_info_all[x].port, port);
+                    }
+
+                    tp_info_all[x].process_id = getpid();
+                    tp_info_this = tp_info_all + x;
+                    return afl_area_ptr;
+                }
+            }
+        }
+        return NULL;
+    }
+    return afl_area_ptr;
+}
+
+#define WITCHER_TRACE() \
+    { \
+        if (afl_area_ptr == NULL) { \
+            cgi_get_shm_mem(); \
+        } \
+        if (afl_area_ptr != NULL) { \
+            afl_area_ptr[(unsigned long) str->cur_bcp() % MAPSIZE]++; \
+        } \
+        fprintf(stderr, "%d 0x%lx\n",getpid(), (unsigned long) str->cur_bcp() % MAPSIZE); \
+    }
+
+bool waitingForMain = true;
+int first_afl_shm=true;
+#define METHOD_NAME_MAX_LEN 100
+char method_name[10];
+static int  prior_visit_val = 0;
+struct thread_item {
+    uintptr_t id;
+    int prior_value;
+    int inited;
+    char instruction_kicker[20];
+};
+thread_item thread_items[10];
+int thread_items_len =  sizeof(thread_items)/sizeof(thread_items[0]);
+int instruction_order = 0;
+
+void set_instruction_name(Bytecodes::Code checkCode, thread_item* thread_ptr ){
+    char* bcop[] = {
+        "goto", "goto_w", "jsr", "jsr_w", "ret",
+        "ifeq", "iflt", "ifle", "ifne", "ifgt",
+        "ifge", "ifnull", "ifnonnull", "if_icmpeq", "if_icmpne",
+        "if_icmplt", "if_icmpgt", "if_icmple", "if_icmpge",
+        "if_acmpeq", "if_acmpne", "lcmp"
+        };
+    Bytecodes::Code bb_targets[] = {
+        Bytecodes::_goto, Bytecodes::_goto_w, Bytecodes::_jsr, Bytecodes::_jsr_w, Bytecodes::_ret,
+        Bytecodes::_ifeq, Bytecodes::_iflt, Bytecodes::_ifle, Bytecodes::_ifne, Bytecodes::_ifgt,
+        Bytecodes::_ifge, Bytecodes::_ifnull, Bytecodes::_ifnonnull, Bytecodes::_if_icmpeq, Bytecodes::_if_icmpne,
+        Bytecodes::_if_icmplt, Bytecodes::_if_icmpgt, Bytecodes::_if_icmple, Bytecodes::_if_icmpge,
+        Bytecodes::_if_acmpeq, Bytecodes::_if_acmpne, Bytecodes::_lcmp,
+        };
+    //  Bytecodes::_fcmpl, Bytecodes::_fcmpg, Bytecodes::_dcmpl, Bytecodes::_dcmpg
+    int bb_targets_len =  sizeof(bb_targets)/sizeof(bb_targets[0]);
+
+    for (int index=0; index < bb_targets_len; index++){
+        if (bb_targets[index] == checkCode){
+            strcpy(thread_ptr->instruction_kicker, bcop[index]);
+            return;
+        }
+    }
+    printf("UNK");
+}
+
+bool isEdge(Bytecodes::Code checkCode){
+    Bytecodes::Code bb_targets[] = {
+        Bytecodes::_goto, Bytecodes::_goto_w, Bytecodes::_jsr, Bytecodes::_jsr_w, Bytecodes::_ret,
+        Bytecodes::_ifeq, Bytecodes::_iflt, Bytecodes::_ifle, Bytecodes::_ifne, Bytecodes::_ifgt,
+        Bytecodes::_ifge, Bytecodes::_ifnull, Bytecodes::_ifnonnull, Bytecodes::_if_icmpeq, Bytecodes::_if_icmpne,
+        Bytecodes::_if_icmplt, Bytecodes::_if_icmpgt, Bytecodes::_if_icmple, Bytecodes::_if_icmpge,
+        Bytecodes::_if_acmpeq, Bytecodes::_if_acmpne, Bytecodes::_lcmp,
+        };
+    //  Bytecodes::_fcmpl, Bytecodes::_fcmpg, Bytecodes::_dcmpl, Bytecodes::_dcmpg
+    int bb_targets_len =  sizeof(bb_targets)/sizeof(bb_targets[0]);
+
+    for (int index=0; index < bb_targets_len; index++){
+        if (bb_targets[index] == checkCode){
+            return true;
+        }
+    }
+    return false;
+}
+IRT_LEAF(intptr_t, InterpreterRuntime::instrument_bytecode(JavaThread* thread, intptr_t preserve_this_value, intptr_t tos, intptr_t tos2))
+    LastFrameAccessor last_frame(thread);
+    int thread_index = 0; //
+    uintptr_t thread_addr = reinterpret_cast<uintptr_t>(thread);
+
+//    if ( prior_vv.find(thread_index) == prior_vv.end() ) {
+//        prior_vv[thread_index] = 0;
+//    }
+    if (waitingForMain){
+        last_frame.method()->name()->as_C_string(method_name, 5);
+        if (method_name[0] == 'm' && method_name[1] == 'a' && method_name[2] == 'i' && method_name[3] == 'n'){
+            waitingForMain = false;
+        }
+    } else {
+
+        if (afl_area_ptr == NULL){
+            cgi_get_shm_mem();
+            if (afl_area_ptr != 0 && first_afl_shm){
+                printf("FOUND PTR using %p \n", afl_area_ptr);
+            }
+
+            if (afl_area_ptr != NULL && tp_info_this->start_recording != 0){
+                printf("\033[36mWITCHER REMEMBERS %lx!, %p\033[0m\n", afl_area_ptr, tp_info_this->start_recording);
+            }
+        }
+        if (first_afl_shm > 0){
+            first_afl_shm++;
+        }
+        if (afl_area_ptr != NULL  && tp_info_this && first_afl_shm % 10000 == 0){
+//                printf("\033[36mMEMORIES   %lx!, %d %d %d %d %p \033[0m\n", afl_area_ptr, tp_info_this->initialized, tp_info_this->port,
+//                        tp_info_this->reqr_process_id, tp_info_this->start_recording, tp_info_this);
+                first_afl_shm=1;
+        }
+        if (tp_info_this && tp_info_this->start_recording == 0){
+            for (int x =0; x < thread_items_len;x++){
+                thread_items[thread_index].id = 0;
+                thread_items[thread_index].inited = 0;
+                thread_items[thread_index].prior_value = 0;
+            }
+        }
+
+//        if (meth_sig[0]=='S' && meth_sig[1]=='e' && meth_sig[2]=='r' && meth_sig[3]=='v'){
+//            int method_index = last_frame.method()->name_index();
+//            int bci = last_frame.bci();
+//
+//            printf("\nSERVEME  %p %d %d #%04d) %s ::> OP=0x%02x ",
+//                afl_area_ptr, tp_info_this->start_recording,
+//                thread_index, instruction_order, meth_sig, last_frame.bytecode().java_code());
+//            print_bytecode_op(last_frame.bytecode().java_code());
+//            printf(" loc=%d+%x *=%d\n",
+//                last_frame.method()->name_index(), last_frame.bci(),
+//                thread_items[thread_index].prior_value);
+//        }
+
+        if (afl_area_ptr != NULL && tp_info_this->start_recording == 1) {
+            for (int x =0; x < thread_items_len;x++){
+                if (thread_items[x].inited == 0x31337){
+                    if (thread_items[x].id == thread_addr){
+                        thread_index = x;
+                        break;
+                    }
+                } else {
+                    thread_index = x;
+                    thread_items[thread_index].id = thread_addr;
+                    thread_items[thread_index].inited = 0x31337;
+                    thread_items[thread_index].prior_value = 0;
+                    break;
+                }
+            }
+            if (thread_index >= 0){
+                char* meth_sig =last_frame.method()->name_and_sig_as_C_string();
+                // if method originates from the packages: java.*, jdk.*, sun.*, org.apache.*, org.xml.*, OR com.sun.*
+                // then skip this instruction
+                if ((meth_sig[0] == 'j' && (meth_sig[3] == 'a' || meth_sig[2] == 'k')) || // j??a or j?k
+                    (meth_sig[0] == 's' && meth_sig[1] == 'u'  && meth_sig[2] == 'n') || // su?
+                    (meth_sig[0] == 'o' && meth_sig[4] == 'a' && meth_sig[5] == 'p' && meth_sig[6] == 'a' && meth_sig[7] == 'c' && meth_sig[8] == 'h') || // o??.apach?
+                    (meth_sig[0] == 'c' && meth_sig[2] == 'm' && meth_sig[4] == 's' && meth_sig[5] == 'u' && meth_sig[6] == 'n' )  || // c?m.sun
+                    (meth_sig[0] == 'o' && meth_sig[2] == 'g' && meth_sig[4] == 'x' && meth_sig[5] == 'm' && meth_sig[6] == 'l' )  // o?g.xml
+                    ){
+                    // skip this one
+                } else {
+
+                    bool didone = false;
+                    if (thread_items[thread_index].prior_value > 0){
+                        instruction_order++;
+                        didone=true;
+
+                        int method_index = last_frame.method()->name_index();
+                        int bci = last_frame.bci();
+                        int canpair = (method_index + bci) * (method_index + bci + 1) / 2 + method_index;
+                        int map_pos = (canpair ^ thread_items[thread_index].prior_value) % MAPSIZE;
+                        afl_area_ptr[map_pos]++;
+
+                        printf("    T-%d #%04d ) OP=%s (0x%02x) ::> pvv=%d  and loc>> %d+%x = %d  map=%d (%d) %s\n",
+                             thread_index, instruction_order, thread_items[thread_index].instruction_kicker,
+                             last_frame.bytecode().java_code(),
+                             thread_items[thread_index].prior_value, last_frame.method()->name_index(), last_frame.bci(),
+                             canpair, map_pos, afl_area_ptr[map_pos], meth_sig);
+
+                        prior_visit_val = 0;
+                        thread_items[thread_index].prior_value = 0;
+                    }
+                    if (isEdge(last_frame.bytecode().java_code())){
+                        didone=true;
+                        instruction_order++;
+                        int method_index = last_frame.method()->name_index();
+                        int bci = last_frame.bci();
+                        // Cantor pairing function
+                        set_instruction_name(last_frame.bytecode().java_code(), thread_items +thread_index);
+                        thread_items[thread_index].prior_value = (method_index + bci) * (method_index + bci + 1) / 2 + method_index;
+//                        printf("Thd %d #%04d) %s ::> OP=0x%02x ", thread_index, instruction_order, meth_sig, last_frame.bytecode().java_code());
+//                        print_bytecode_op(last_frame.bytecode().java_code());
+//                        printf(" loc=%d+%x *=%d\n",
+//                             last_frame.method()->name_index(), last_frame.bci(),
+//                            thread_items[thread_index].prior_value);
+//                        fflush(stdout);
+
+                    }
+//                    if (!didone){
+//
+//                        int method_index = last_frame.method()->name_index();
+//                        int bci = last_frame.bci();
+//
+//                        printf("\nEXT %d #%04d) %s ::> OP=0x%02x ", thread_index, instruction_order, meth_sig, last_frame.bytecode().java_code());
+//                        print_bytecode_op(last_frame.bytecode().java_code());
+//                        printf(" loc=%d+%x *=%d\n",
+//                             last_frame.method()->name_index(), last_frame.bci(),
+//                            thread_items[thread_index].prior_value);
+//                    }
+                }
+
+            }
+
+
+            //printf("\t%s --> %d --> %p bcp=%p bci=%p mdp=%p\n", method_name, last_frame.method()->name_index(), last_frame.get_frame().fp(), last_frame.bcp(), last_frame.bci(), last_frame.mdp());
+        }
+    }
+
+    //printf("\t%s --> %d --> %p %p \n", method_name, last_frame.method()->name_index(), last_frame.get_frame().fp(), last_frame.bcp());
+
+  return preserve_this_value;
+IRT_END
+
 #ifndef PRODUCT
 // This must be a IRT_LEAF function because the interpreter must save registers on x86 to
 // call this, which changes rsp and makes the interpreter's expression stack not walkable.

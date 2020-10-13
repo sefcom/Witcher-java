@@ -1791,6 +1791,68 @@ void TemplateInterpreterGenerator::set_vtos_entry_points(Template* t,
 }
 
 //-----------------------------------------------------------------------------
+address TemplateInterpreterGenerator::generate_instrument_code(TosState state) {
+  address entry = __ pc();
+#ifndef _LP64
+  // prepare expression stack
+  __ pop(rcx);          // pop return address so expression stack is 'pure'
+  __ push(state);       // save tosca
+
+  // pass tosca registers as arguments & call tracer
+  //interrepterRuntime.cpp    InterpreterRuntime::instrument_bytecode
+  __ call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::instrument_bytecode), rcx, rax, rdx);
+  __ mov(rcx, rax);     // make sure return address is not destroyed by pop(state)
+  __ pop(state);        // restore tosca
+
+  // return
+  __ jmp(rcx);
+#else
+  __ push(state);
+  __ push(c_rarg0);
+  __ push(c_rarg1);
+  __ push(c_rarg2);
+  __ push(c_rarg3);
+  __ mov(c_rarg2, rax);  // Pass itos
+#ifdef _WIN64
+  __ movflt(xmm3, xmm0); // Pass ftos
+#endif
+   //interrepterRuntime.cpp    InterpreterRuntime::instrument_bytecode
+  WitcherDebug = true;
+  __ call_VM(noreg,
+             CAST_FROM_FN_PTR(address, InterpreterRuntime::instrument_bytecode),
+             c_rarg1, c_rarg2, c_rarg3);
+  WitcherDebug = false;
+  __ pop(c_rarg3);
+  __ pop(c_rarg2);
+  __ pop(c_rarg1);
+  __ pop(c_rarg0);
+  __ pop(state);
+  __ ret(0);                                   // return from result handler
+#endif // _LP64
+
+  return entry;
+}
+
+
+//Witcher instrumentation
+void TemplateInterpreterGenerator::instrument_bytecode_fn(Template* t) {
+  // Call a little run-time stub to avoid blow-up for each bytecode.
+  // The run-time runtime saves the right registers, depending on
+  // the tosca in-state for the given template.
+  assert(Interpreter::instrument_code(t->tos_in()) != NULL,
+         "entry must have been generated");
+#ifndef _LP64
+    // templateInterpreterGenerator_ARCH.cpp    TemplateInterpreterGenerator::generate_instrument_code
+  __ call(RuntimeAddress(Interpreter::instrument_code(t->tos_in())));
+#else
+  __ mov(r12, rsp); // remember sp (can only use r12 if not using call_VM)
+  __ andptr(rsp, -16); // align stack as required by ABI
+  __ call(RuntimeAddress(Interpreter::instrument_code(t->tos_in())));
+  __ mov(rsp, r12); // restore sp
+  __ reinit_heapbase();
+#endif // _LP64
+}
+
 
 // Non-product code
 #ifndef PRODUCT
@@ -1852,7 +1914,6 @@ void TemplateInterpreterGenerator::histogram_bytecode_pair(Template* t) {
   __ lea(rscratch1, ExternalAddress((address) BytecodePairHistogram::_counters));
   __ incrementl(Address(rscratch1, rbx, Address::times_4));
 }
-
 
 void TemplateInterpreterGenerator::trace_bytecode(Template* t) {
   // Call a little run-time stub to avoid blow-up for each bytecode.

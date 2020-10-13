@@ -1005,6 +1005,16 @@ define_pd_global(uint64_t,MaxRAM,                    1ULL*G);
   develop(bool, TraceBytecodes, false,                                      \
           "Trace bytecode execution")                                       \
                                                                             \
+  product(bool, WitcherInstrumentation, false,                              \
+          "Add Witcher Instrumentation")                                    \
+                                                                            \
+  product(bool, WitcherDebug, false,                                        \
+          "Add Witcher Instrumentation")                                    \
+                                                                            \
+  product(intx, WitcherWebPort, 65536,                                      \
+          "Port that's used for this web instance ")                        \
+          range(min_intx, max_intx)                                         \
+                                                                            \
   develop(bool, TraceICs, false,                                            \
           "Trace inline cache changes")                                     \
                                                                             \

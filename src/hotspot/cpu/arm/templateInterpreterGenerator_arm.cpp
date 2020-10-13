@@ -1922,13 +1922,24 @@ void TemplateInterpreterGenerator::histogram_bytecode_pair(Template* t) {
 }
 
 
+void TemplateInterpreterGenerator::instrument_bytecode_fn(Template* t) {
+  // Call a little run-time stub to avoid blow-up for each bytecode.
+  // The run-time runtime saves the right registers, depending on
+  // the tosca in-state for the given template.
+  printf("OTHEROTHEROTHER\n");
+  assert(Interpreter::instrument_code(t->tos_in()) != NULL,
+         "entry must have been generated");
+  address trace_entry = Interpreter::instrument_code(t->tos_in());
+  __ call(trace_entry, relocInfo::none);
+}
+
 void TemplateInterpreterGenerator::trace_bytecode(Template* t) {
   // Call a little run-time stub to avoid blow-up for each bytecode.
   // The run-time runtime saves the right registers, depending on
   // the tosca in-state for the given template.
-  assert(Interpreter::trace_code(t->tos_in()) != NULL,
+  assert(Interpreter::instrument_code(t->tos_in()) != NULL,
          "entry must have been generated");
-  address trace_entry = Interpreter::trace_code(t->tos_in());
+  address trace_entry = Interpreter::instrument_code(t->tos_in());
   __ call(trace_entry, relocInfo::none);
 }
 

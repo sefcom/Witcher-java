@@ -118,6 +118,9 @@ class TemplateInterpreter: public AbstractInterpreter {
 #ifndef PRODUCT
   static EntryPoint _trace_code;
 #endif // !PRODUCT
+
+  static EntryPoint _instrument_code; // Witcher instrumentation
+
   static EntryPoint _return_entry[number_of_return_entries];    // entry points to return to from a call
   static EntryPoint _earlyret_entry;                            // entry point to return early from a call
   static EntryPoint _deopt_entry[number_of_deopt_entries];      // entry points to return to from a deoptimization
@@ -159,7 +162,11 @@ class TemplateInterpreter: public AbstractInterpreter {
   // Code generation
 #ifndef PRODUCT
   static address    trace_code    (TosState state)              { return _trace_code.entry(state); }
+
 #endif // !PRODUCT
+
+  static address    instrument_code    (TosState state)         { return _instrument_code.entry(state); } // Witcher instrumentation
+
   static address*   dispatch_table(TosState state)              { return _active_table.table_for(state); }
   static address*   dispatch_table()                            { return _active_table.table_for(); }
   static int        distance_from_dispatch_table(TosState state){ return _active_table.distance_from(state); }
