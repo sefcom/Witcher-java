@@ -1542,7 +1542,7 @@ void TemplateInterpreterGenerator::generate_throw_exception() {
   // removed and the exception is rethrown (i.e. exception
   // continuation is _rethrow_exception).
   //
-  // Note: At this point the bci is still the bxi for the instruction
+  // Note: At this point the bci is still the bxi for the truction
   // which caused the exception and the expression stack is
   // empty. Thus, for any VM calls at this point, GC will find a legal
   // oop map (with empty expression stack).
@@ -1818,6 +1818,7 @@ address TemplateInterpreterGenerator::generate_instrument_code(TosState state) {
 #endif
    //interrepterRuntime.cpp    InterpreterRuntime::instrument_bytecode
   WitcherDebug = true;
+
   __ call_VM(noreg,
              CAST_FROM_FN_PTR(address, InterpreterRuntime::instrument_bytecode),
              c_rarg1, c_rarg2, c_rarg3);

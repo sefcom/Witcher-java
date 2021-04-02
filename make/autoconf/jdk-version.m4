@@ -190,7 +190,7 @@ AC_DEFUN_ONCE([JDKVER_SETUP_JDK_VERSION_NUMBERS],
   else
     if test "x$NO_DEFAULT_VERSION_PARTS" != xtrue; then
       # Default is to use "internal" as pre
-      VERSION_PRE="internal"
+      VERSION_PRE="Witcher1-internal"
     fi
   fi
 
